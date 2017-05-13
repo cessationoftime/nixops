@@ -31,6 +31,11 @@ with lib;
       type = types.str;
       description = "Amazon Resource Name (ARN) of the S3 bucket. This is set by NixOps.";
     };
+
+    renameToUID = mkOption {
+      type = types.bool;
+      description = "Rename the uploaded file or folder to a unique identifier.";
+    }
   };
 
 }

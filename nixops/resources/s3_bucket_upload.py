@@ -139,3 +139,69 @@ def region_to_s3_location(region):
     if region == "eu-west-1": return "EU"
     elif region == "us-east-1": return ""
     else: return region
+
+#TODO: make this work for  subdirectories
+def getFileList(sourceDirectory,bucketDestDir):
+    sourceFileNames = []
+    for (sourceDir, dirNames, fileNames) in os.walk(sourceDirectory):
+        for fn in fileNames
+        sourceFileNames.append(os.path.join(sourceDir, fn))
+
+    sourceDestPairs = []
+
+    for sourceFile in sourceFileNames
+        destFile = sourceFile.replace(sourceDirectory,bucketDestDir)
+        sourceDestPairs.append((sourceFile,destFile))
+
+    return sourceDestPairs
+
+def performUpload(bucket_name, sourceDir, bucketDestDir):
+    # Fill in info on data to upload
+    # destination bucket name
+    #bucket_name = 'jwu-testbucket'
+    # source directory
+    #sourceDir = 'testdata/'
+    # destination directory name (on s3)
+    #bucketDestDir = ''
+
+    #max size in bytes before uploading in parts. between 1 and 5 GB recommended
+    MAX_SIZE = 20 * 1000 * 1000
+    #size of parts when uploading in parts
+    PART_SIZE = 6 * 1000 * 1000
+
+    bucket = self._conn.get_bucket(bucket_name)
+
+    sourceDestPairs = getFileList(sourceDir, bucketDestDir);
+
+    def percent_cb(complete, total):
+        sys.stdout.write('.')
+        sys.stdout.flush()
+
+    for (sourcePath,destPath) in sourceDestPairs:
+        self.log("Uploading '{0}' to Amazon S3 bucket {1}".format(sourcePath, bucket_name))
+
+        filesize = os.path.getsize(sourcePath)
+        if filesize > MAX_SIZE:
+            self.log("multipart upload")
+            mp = bucket.initiate_multipart_upload(destPath)
+            fp = open(sourcePath,'rb')
+            fp_num = 0
+            while (fp.tell() < filesize):
+                fp_num += 1
+                self.log("uploading part {0}".format(fp_num))
+                mp.upload_part_from_file(fp, fp_num, cb=percent_cb, num_cb=10, size=PART_SIZE)
+
+            mp.complete_upload()
+
+        else:
+            self.log("singlepart upload")
+            k = boto.s3.key.Key(bucket)
+            k.key = destPath
+            k.set_contents_from_filename(sourcePath, cb=percent_cb, num_cb=10)
+
+def fileExistsInBucket(bucket, key):
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+        return True
+    except:
+        return False
