@@ -22,11 +22,14 @@ class S3BucketUploadDefinition(nixops.resources.ResourceDefinition):
 
     def __init__(self, xml):
         nixops.resources.ResourceDefinition.__init__(self, xml)
-        self.bucket_name = xml.find("attrs/attr[@name='name']/string").get("value")
-        self.bucket_upload_name = xml.find("attrs/attr[@name='name']/string").get("value")
+        self.bucket_upload_name = xml.find("attrs/attr[@name='uploadName']/string").get("value")
+        self.bucket_name = xml.find("attrs/attr[@name='bucketName']/string").get("value")
+        self.source = xml.find("attrs/attr[@name='source']/string").get("value")
+        self.bucket_destination = xml.find("attrs/attr[@name='bucketDestination']/string").get("value")
+        self.rename_to_uid = xml.find("attrs/attr[@name='renameToUID']/bool").get("value")
         self.region = xml.find("attrs/attr[@name='region']/string").get("value")
         self.access_key_id = xml.find("attrs/attr[@name='accessKeyId']/string").get("value")
-        self.policy = xml.find("attrs/attr[@name='policy']/string").get("value")
+
 
     def show_type(self):
         return "{0} [{1}]".format(self.get_type(), self.region)
@@ -36,11 +39,14 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     """State of an S3 bucket upload."""
 
     state = nixops.util.attr_property("state", nixops.resources.ResourceState.MISSING, int)
+    bucket_upload_name = nixops.util.attr_property("ec2.uploadName", None)
     bucket_name = nixops.util.attr_property("ec2.bucketName", None)
-    bucket_upload_name = nixops.util.attr_property("ec2.bucketUploadName", None)
-    access_key_id = nixops.util.attr_property("ec2.accessKeyId", None)
-    rename_to_uid = nixops.util.attr_property("ec2.policy", None)
+    source = nixops.util.attr_property("ec2.source", None)
+    bucket_destination = nixops.util.attr_property("ec2.bucketDestination", None)
+    rename_to_uid = nixops.util.attr_property("ec2.renameToUID", None)
     region = nixops.util.attr_property("ec2.region", None)
+    access_key_id = nixops.util.attr_property("ec2.accessKeyId", None)
+
 
 
     @classmethod
@@ -82,52 +88,43 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         if not self.access_key_id:
             raise Exception("please set ‘accessKeyId’, $EC2_ACCESS_KEY or $AWS_ACCESS_KEY_ID")
 
-        if len(defn.bucket_upload_name) > 63:
-            raise Exception("bucket upload name ‘{0}’ is longer than 63 characters.".format(defn.bucket_upload_name))
+        if len(defn.bucket_name) > 63:
+            raise Exception("bucket name ‘{0}’ is longer than 63 characters.".format(defn.bucket_name))
 
         if check or self.state != self.UP:
 
             self.connect()
 
-            self.log("creating S3 bucket upload ‘{0}’...".format(defn.bucket_upload_name))
-            try:
-                self._conn.create_bucket(defn.bucket_upload_name, location=region_to_s3_location(defn.region))
-            except boto.exception.S3CreateError as e:
-                if e.error_code != "BucketAlreadyOwnedByYou": raise
+            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.bucket_upload_name, defn.bucket_name))
 
-            bucket = self._conn.get_bucket(defn.bucket_upload_name)
-            if defn.policy:
-                self.log("setting S3 bucket policy on ‘{0}’...".format(bucket))
-                bucket.set_policy(defn.policy.strip())
-            else:
-                try:
-                    bucket.delete_policy()
-                except boto.exception.S3ResponseError as e:
-                    # This seems not to happen - despite docs indicating it should:
-                    # [http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketDELETEpolicy.html]
-                    if e.status != 204: raise # (204 : Bucket didn't have any policy to delete)
+            bucket = self._conn.get_bucket(defn.bucket_name)
+
+            self.perform_upload(bucket, defn.source, defn.bucket_destination)
 
             with self.depl._db:
                 self.state = self.UP
                 self.bucket_upload_name = defn.bucket_upload_name
+                self.bucket_name = defn.bucket_name
+                self.source = defn.source
+                self.bucket_destination = defn.bucket_destination
+                self.rename_to_uid = defn.rename_to_uid
                 self.region = defn.region
-                self.policy = defn.policy
-
+                self.access_key_id = defn.access_key_id
 
     def destroy(self, wipe=False):
         if self.state == self.UP:
             self.connect()
             try:
-                self.log("destroying S3 bucket ‘{0}’...".format(self.bucket_upload_name))
-                bucket = self._conn.get_bucket(self.bucket_upload_name)
+                self.log("destroying S3 bucket upload ‘{0}’...".format(self.bucket_upload_name))
+                bucket = self._conn.get_bucket(self.bucket_name)
                 try:
-                    bucket.delete()
+                    #bucket.delete()
                 except boto.exception.S3ResponseError as e:
-                    if e.error_code != "BucketNotEmpty": raise
-                    if not self.depl.logger.confirm("are you sure you want to destroy S3 bucket ‘{0}’?".format(self.bucket_upload_name)): return False
-                    keys = bucket.list()
-                    bucket.delete_keys(keys)
-                    bucket.delete()
+                    #if e.error_code != "BucketNotEmpty": raise
+                    #if not self.depl.logger.confirm("are you sure you want to destroy S3 bucket ‘{0}’?".format(self.bucket_upload_name)): return False
+                    #keys = bucket.list()
+                    #bucket.delete_keys(keys)
+                    #bucket.delete()
             except boto.exception.S3ResponseError as e:
                 if e.error_code != "NoSuchBucket": raise
         return True
@@ -163,7 +160,7 @@ def file_exists_in_bucket(self, bucket, file_key):
     except:
         return False
 
-def perform_upload(self, bucket_name, source_dir, bucket_dest_dir):
+def perform_upload(self, bucket, source_dir, bucket_dest_dir):
     # Fill in info on data to upload
     # destination bucket name
     #bucket_name = 'jwu-testbucket'
@@ -177,8 +174,6 @@ def perform_upload(self, bucket_name, source_dir, bucket_dest_dir):
     #size of parts when uploading in parts
     PART_SIZE = 6 * 1000 * 1000
 
-    bucket = self._conn.get_bucket(bucket_name)
-
     source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
 
     def percent_cb(complete, total):
@@ -189,7 +184,7 @@ def perform_upload(self, bucket_name, source_dir, bucket_dest_dir):
         if self.file_exists_in_bucket(bucket, dest_path):
            continue
 
-        self.log("Uploading '{0}' to Amazon S3 bucket {1}".format(source_path, bucket_name))
+        self.log("Uploading '{0}' to Amazon S3 bucket".format(source_path))
 
         filesize = os.path.getsize(source_path)
         if filesize > MAX_SIZE:

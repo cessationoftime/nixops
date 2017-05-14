@@ -6,15 +6,30 @@ with lib;
 
   options = {
 
-    name = mkOption {
+    uploadName = mkOption {
       type = types.str;
-      description = "Name of the S3 bucket upload.";
+      description = "Short description of this upload.";
     };
 
     bucketName = mkOption {
       default = "charon-${uuid}-${name}";
       type = types.str;
       description = "Name of the S3 bucket to upload to.";
+    };
+
+    source = mkOption {
+      type = types.str;
+      description = "Local file or folder path";
+    };
+
+    bucketDestination = mkOption {
+      type = types.str;
+      description = "Bucket file key (remote path).";
+    };
+
+    renameToUID = mkOption {
+      type = types.bool;
+      description = "Rename the uploaded file or folder to a unique identifier.";
     };
 
     region = mkOption {
@@ -27,15 +42,7 @@ with lib;
       description = "The AWS Access Key ID.";
     };
 
-    arn = mkOption {
-      type = types.str;
-      description = "Amazon Resource Name (ARN) of the S3 bucket. This is set by NixOps.";
-    };
 
-    renameToUID = mkOption {
-      type = types.bool;
-      description = "Rename the uploaded file or folder to a unique identifier.";
-    }
   };
 
 }
