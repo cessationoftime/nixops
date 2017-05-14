@@ -117,14 +117,9 @@ class S3BucketUploadState(nixops.resources.ResourceState):
             try:
                 self.log("destroying S3 bucket upload ‘{0}’...".format(self.bucket_upload_name))
                 bucket = self._conn.get_bucket(self.bucket_name)
-                try:
-                    #bucket.delete()
-                except boto.exception.S3ResponseError as e:
-                    #if e.error_code != "BucketNotEmpty": raise
-                    #if not self.depl.logger.confirm("are you sure you want to destroy S3 bucket ‘{0}’?".format(self.bucket_upload_name)): return False
-                    #keys = bucket.list()
-                    #bucket.delete_keys(keys)
-                    #bucket.delete()
+                bucketListResultSet = bucket.list(prefix=self.bucket_destination)
+                bucket.delete_keys([key.name for key in bucketListResultSet])
+
             except boto.exception.S3ResponseError as e:
                 if e.error_code != "NoSuchBucket": raise
         return True
