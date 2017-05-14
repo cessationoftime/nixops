@@ -39,7 +39,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     bucket_name = nixops.util.attr_property("ec2.bucketName", None)
     bucket_upload_name = nixops.util.attr_property("ec2.bucketUploadName", None)
     access_key_id = nixops.util.attr_property("ec2.accessKeyId", None)
-    policy = nixops.util.attr_property("ec2.policy", None)
+    rename_to_uid = nixops.util.attr_property("ec2.policy", None)
     region = nixops.util.attr_property("ec2.region", None)
 
 
@@ -133,29 +133,37 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         return True
 
 
-def region_to_s3_location(region):
+def region_to_s3_location(self, region):
     # S3 location names are identical to EC2 regions, except for
     # us-east-1 and eu-west-1.
     if region == "eu-west-1": return "EU"
     elif region == "us-east-1": return ""
     else: return region
 
-#TODO: make this work for  subdirectories
-def getFileList(sourceDirectory,bucketDestDir):
+def get_file_list(self, source_directory,bucket_dest_dir):
     sourceFileNames = []
-    for (sourceDir, dirNames, fileNames) in os.walk(sourceDirectory):
-        for fn in fileNames
-        sourceFileNames.append(os.path.join(sourceDir, fn))
+    for (source_dir, dir_names, file_names) in os.walk(source_directory):
+        for fn in file_names
+        source_fileN_nmes.append(os.path.join(source_dir, fn))
 
-    sourceDestPairs = []
+    source_dest_pairs = []
 
-    for sourceFile in sourceFileNames
-        destFile = sourceFile.replace(sourceDirectory,bucketDestDir)
-        sourceDestPairs.append((sourceFile,destFile))
+    #preserve subdirectory nesting from the original location.
+    for source_file in source_file_names
+        dest_file = source_file.replace(source_directory, bucket_dest_dir)
+        source_dest_pairs.append((source_file,dest_file))
 
-    return sourceDestPairs
+    return source_dest_pairs
 
-def performUpload(bucket_name, sourceDir, bucketDestDir):
+
+def file_exists_in_bucket(self, bucket, file_key):
+    try:
+        self._conn.head_object(Bucket=bucket, Key=file_key)
+        return True
+    except:
+        return False
+
+def perform_upload(self, bucket_name, source_dir, bucket_dest_dir):
     # Fill in info on data to upload
     # destination bucket name
     #bucket_name = 'jwu-testbucket'
@@ -171,20 +179,23 @@ def performUpload(bucket_name, sourceDir, bucketDestDir):
 
     bucket = self._conn.get_bucket(bucket_name)
 
-    sourceDestPairs = getFileList(sourceDir, bucketDestDir);
+    source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
 
     def percent_cb(complete, total):
         sys.stdout.write('.')
         sys.stdout.flush()
 
-    for (sourcePath,destPath) in sourceDestPairs:
-        self.log("Uploading '{0}' to Amazon S3 bucket {1}".format(sourcePath, bucket_name))
+    for (source_path, dest_path) in source_dest_pairs:
+        if self.file_exists_in_bucket(bucket, dest_path):
+           continue
 
-        filesize = os.path.getsize(sourcePath)
+        self.log("Uploading '{0}' to Amazon S3 bucket {1}".format(source_path, bucket_name))
+
+        filesize = os.path.getsize(source_path)
         if filesize > MAX_SIZE:
             self.log("multipart upload")
-            mp = bucket.initiate_multipart_upload(destPath)
-            fp = open(sourcePath,'rb')
+            mp = bucket.initiate_multipart_upload(dest_path)
+            fp = open(source_path,'rb')
             fp_num = 0
             while (fp.tell() < filesize):
                 fp_num += 1
@@ -196,12 +207,5 @@ def performUpload(bucket_name, sourceDir, bucketDestDir):
         else:
             self.log("singlepart upload")
             k = boto.s3.key.Key(bucket)
-            k.key = destPath
-            k.set_contents_from_filename(sourcePath, cb=percent_cb, num_cb=10)
-
-def fileExistsInBucket(bucket, key):
-    try:
-        client.head_object(Bucket=bucket, Key=key)
-        return True
-    except:
-        return False
+            k.key = dest_path
+            k.set_contents_from_filename(source_path, cb=percent_cb, num_cb=10)
