@@ -133,15 +133,15 @@ def region_to_s3_location(self, region):
     else: return region
 
 def get_file_list(self, source_directory,bucket_dest_dir):
-    sourceFileNames = []
+    source_file_names = []
     for (source_dir, dir_names, file_names) in os.walk(source_directory):
-        for fn in file_names
-        source_fileN_nmes.append(os.path.join(source_dir, fn))
+        for fn in file_names:
+            source_file_names.append(os.path.join(source_dir, fn))
 
     source_dest_pairs = []
 
     #preserve subdirectory nesting from the original location.
-    for source_file in source_file_names
+    for source_file in source_file_names:
         dest_file = source_file.replace(source_directory, bucket_dest_dir)
         source_dest_pairs.append((source_file,dest_file))
 
