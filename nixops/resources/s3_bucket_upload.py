@@ -7,7 +7,7 @@ import boto.s3.connection
 import nixops.util
 import nixops.resources
 import nixops.ec2_utils
-
+import os
 
 class S3BucketUploadDefinition(nixops.resources.ResourceDefinition):
     """Definition of an S3 bucket upload."""
@@ -72,10 +72,93 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     def get_definition_prefix(self):
         return "resources.s3BucketUploads."
 
-    def connect(self):
+    def connect(self, bucket_name):
         if self._conn: return
         (access_key_id, secret_access_key) = nixops.ec2_utils.fetch_aws_secret_key(self.access_key_id)
-        self._conn = boto.s3.connection.S3Connection(aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
+
+        if '.' in bucket_name:
+          self._conn = boto.s3.connection.S3Connection(aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key, calling_format=boto.s3.connection.OrdinaryCallingFormat())
+        else:
+          self._conn = boto.s3.connection.S3Connection(aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
+
+
+    def get_file_list(self, source_directory,bucket_dest_dir):
+        self.log("get file list from '{0}' to bucket dest ‘{1}’...".format(source_directory, bucket_dest_dir))
+
+        if not os.path.exists(source_directory):
+            raise Exception("source directory for bucket upload '{0}' does not exist".format(source_directory))
+
+
+
+        source_file_names = []
+        for (source_dir, dir_names, file_names) in os.walk(source_directory):
+            for fn in file_names:
+                source_file_names.append(os.path.join(source_dir, fn))
+
+        source_dest_pairs = []
+
+        #preserve subdirectory nesting from the original location.
+        for source_file in source_file_names:
+            dest_file = source_file.replace(source_directory, bucket_dest_dir)
+            source_dest_pairs.append((source_file,dest_file))
+            self.log("'{0}' to ‘{1}’".format(source_file, dest_file))
+
+        return source_dest_pairs
+
+
+    def file_exists_in_bucket(self, bucket, file_key):
+        try:
+            self._conn.head_object(Bucket=bucket, Key=file_key)
+            return True
+        except:
+            return False
+
+    def perform_upload(self, bucket, source_dir, bucket_dest_dir):
+        self.log("perform upload '{0}' to bucket dest ‘{1}’...".format(source_dir, bucket_dest_dir))
+        # Fill in info on data to upload
+        # destination bucket name
+        #bucket_name = 'jwu-testbucket'
+        # source directory
+        #sourceDir = 'testdata/'
+        # destination directory name (on s3)
+        #bucketDestDir = ''
+
+        #max size in bytes before uploading in parts. between 1 and 5 GB recommended
+        MAX_SIZE = 20 * 1000 * 1000
+        #size of parts when uploading in parts
+        PART_SIZE = 6 * 1000 * 1000
+
+        source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
+
+        def percent_cb(complete, total):
+            sys.stdout.write('.')
+            sys.stdout.flush()
+
+        for (source_path, dest_path) in source_dest_pairs:
+            if self.file_exists_in_bucket(bucket, dest_path):
+               continue
+
+            self.log("Uploading '{0}' to Amazon S3 bucket".format(source_path))
+
+            filesize = os.path.getsize(source_path)
+            if filesize > MAX_SIZE:
+                self.log("multipart upload")
+                mp = bucket.initiate_multipart_upload(dest_path)
+                fp = open(source_path,'rb')
+                fp_num = 0
+                while (fp.tell() < filesize):
+                    fp_num += 1
+                    self.log("uploading part {0}".format(fp_num))
+                    mp.upload_part_from_file(fp, fp_num, cb=percent_cb, num_cb=10, size=PART_SIZE)
+
+                mp.complete_upload()
+
+            else:
+                self.log("singlepart upload")
+                k = boto.s3.key.Key(bucket)
+                k.key = dest_path
+                k.set_contents_from_filename(source_path, cb=percent_cb, num_cb=10)
+
 
     def create_after(self, resources, defn):
         return {r for r in resources if
@@ -93,7 +176,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
         if check or self.state != self.UP:
 
-            self.connect()
+            self.connect(defn.bucket_name)
 
             self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.bucket_upload_name, defn.bucket_name))
 
@@ -113,7 +196,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
     def destroy(self, wipe=False):
         if self.state == self.UP:
-            self.connect()
+            self.connect(self.bucket_name)
             try:
                 self.log("destroying S3 bucket upload ‘{0}’...".format(self.bucket_upload_name))
                 bucket = self._conn.get_bucket(self.bucket_name)
@@ -131,71 +214,3 @@ def region_to_s3_location(self, region):
     if region == "eu-west-1": return "EU"
     elif region == "us-east-1": return ""
     else: return region
-
-def get_file_list(self, source_directory,bucket_dest_dir):
-    source_file_names = []
-    for (source_dir, dir_names, file_names) in os.walk(source_directory):
-        for fn in file_names:
-            source_file_names.append(os.path.join(source_dir, fn))
-
-    source_dest_pairs = []
-
-    #preserve subdirectory nesting from the original location.
-    for source_file in source_file_names:
-        dest_file = source_file.replace(source_directory, bucket_dest_dir)
-        source_dest_pairs.append((source_file,dest_file))
-
-    return source_dest_pairs
-
-
-def file_exists_in_bucket(self, bucket, file_key):
-    try:
-        self._conn.head_object(Bucket=bucket, Key=file_key)
-        return True
-    except:
-        return False
-
-def perform_upload(self, bucket, source_dir, bucket_dest_dir):
-    # Fill in info on data to upload
-    # destination bucket name
-    #bucket_name = 'jwu-testbucket'
-    # source directory
-    #sourceDir = 'testdata/'
-    # destination directory name (on s3)
-    #bucketDestDir = ''
-
-    #max size in bytes before uploading in parts. between 1 and 5 GB recommended
-    MAX_SIZE = 20 * 1000 * 1000
-    #size of parts when uploading in parts
-    PART_SIZE = 6 * 1000 * 1000
-
-    source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
-
-    def percent_cb(complete, total):
-        sys.stdout.write('.')
-        sys.stdout.flush()
-
-    for (source_path, dest_path) in source_dest_pairs:
-        if self.file_exists_in_bucket(bucket, dest_path):
-           continue
-
-        self.log("Uploading '{0}' to Amazon S3 bucket".format(source_path))
-
-        filesize = os.path.getsize(source_path)
-        if filesize > MAX_SIZE:
-            self.log("multipart upload")
-            mp = bucket.initiate_multipart_upload(dest_path)
-            fp = open(source_path,'rb')
-            fp_num = 0
-            while (fp.tell() < filesize):
-                fp_num += 1
-                self.log("uploading part {0}".format(fp_num))
-                mp.upload_part_from_file(fp, fp_num, cb=percent_cb, num_cb=10, size=PART_SIZE)
-
-            mp.complete_upload()
-
-        else:
-            self.log("singlepart upload")
-            k = boto.s3.key.Key(bucket)
-            k.key = dest_path
-            k.set_contents_from_filename(source_path, cb=percent_cb, num_cb=10)

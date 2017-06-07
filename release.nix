@@ -7,7 +7,7 @@ let
   pkgs = import <nixpkgs> { };
 
   version = "1.5.1" + (if officialRelease then "" else "pre${toString nixopsSrc.revCount}_${nixopsSrc.shortRev}");
-
+  
 in
 
 rec {
