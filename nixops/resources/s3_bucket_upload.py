@@ -47,23 +47,18 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     region = nixops.util.attr_property("ec2.region", None)
     access_key_id = nixops.util.attr_property("ec2.accessKeyId", None)
 
-
-
     @classmethod
     def get_type(cls):
         return "s3-bucket-upload"
-
 
     def __init__(self, depl, name, id):
         nixops.resources.ResourceState.__init__(self, depl, name, id)
         self._conn = None
 
-
     def show_type(self):
         s = super(S3BucketUploadState, self).show_type()
         if self.region: s = "{0} [{1}]".format(s, self.region)
         return s
-
 
     @property
     def resource_id(self):
@@ -115,13 +110,6 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
     def perform_upload(self, bucket, source_dir, bucket_dest_dir):
         self.log("perform upload '{0}' to bucket dest ‘{1}’...".format(source_dir, bucket_dest_dir))
-        # Fill in info on data to upload
-        # destination bucket name
-        #bucket_name = 'jwu-testbucket'
-        # source directory
-        #sourceDir = 'testdata/'
-        # destination directory name (on s3)
-        #bucketDestDir = ''
 
         #max size in bytes before uploading in parts. between 1 and 5 GB recommended
         MAX_SIZE = 20 * 1000 * 1000
@@ -131,8 +119,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
 
         def percent_cb(complete, total):
-            sys.stdout.write('.')
-            sys.stdout.flush()
+            self.log('.')
 
         for (source_path, dest_path) in source_dest_pairs:
             if self.file_exists_in_bucket(bucket, dest_path):
