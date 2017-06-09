@@ -8,6 +8,7 @@ import nixops.util
 import nixops.resources
 import nixops.ec2_utils
 import os
+import subprocess
 
 class S3BucketUploadDefinition(nixops.resources.ResourceDefinition):
     """Definition of an S3 bucket upload."""
@@ -22,9 +23,10 @@ class S3BucketUploadDefinition(nixops.resources.ResourceDefinition):
 
     def __init__(self, xml):
         nixops.resources.ResourceDefinition.__init__(self, xml)
-        self.bucket_upload_name = xml.find("attrs/attr[@name='uploadName']/string").get("value")
+        self.upload_description = xml.find("attrs/attr[@name='description']/string").get("value")
         self.bucket_name = xml.find("attrs/attr[@name='bucketName']/string").get("value")
-        self.source = xml.find("attrs/attr[@name='source']/string").get("value")
+        self.source_directory = xml.find("attrs/attr[@name='sourceDirectory']/string").get("value")
+        self.source_package = xml.find("attrs/attr[@name='sourcePackage']/string").get("value")
         self.bucket_destination = xml.find("attrs/attr[@name='bucketDestination']/string").get("value")
         self.rename_to_uid = xml.find("attrs/attr[@name='renameToUID']/bool").get("value")
         self.region = xml.find("attrs/attr[@name='region']/string").get("value")
@@ -39,9 +41,10 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     """State of an S3 bucket upload."""
 
     state = nixops.util.attr_property("state", nixops.resources.ResourceState.MISSING, int)
-    bucket_upload_name = nixops.util.attr_property("ec2.uploadName", None)
+    upload_description = nixops.util.attr_property("ec2.description", None)
     bucket_name = nixops.util.attr_property("ec2.bucketName", None)
-    source = nixops.util.attr_property("ec2.source", None)
+    source_directory = nixops.util.attr_property("ec2.sourceDirectory", None)
+    source_package = nixops.util.attr_property("ec2.sourcePackage", None)
     bucket_destination = nixops.util.attr_property("ec2.bucketDestination", None)
     rename_to_uid = nixops.util.attr_property("ec2.renameToUID", None)
     region = nixops.util.attr_property("ec2.region", None)
@@ -62,7 +65,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
     @property
     def resource_id(self):
-        return self.bucket_upload_name
+        return self.upload_description
 
     def get_definition_prefix(self):
         return "resources.s3BucketUploads."
@@ -76,14 +79,32 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         else:
           self._conn = boto.s3.connection.S3Connection(aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
 
+    def build_package(self, source_package):
+        """Build the S3 upload configurations in the Nix store."""
 
-    def get_file_list(self, source_directory,bucket_dest_dir):
+        self.log("building configurations for S3 upload...")
+
+        try:
+          result_path = subprocess.check_output(
+                 ["nix-build"] + [source_package],
+                 #stderr=self.logger.log_file
+                 ).rstrip()
+        except subprocess.CalledProcessError:
+          raise Exception("unable to build all machine configurations")
+
+        return result_path
+
+    def get_file_list(self, source_package, source_directory, bucket_dest_dir):
         self.log("get file list from '{0}' to bucket dest ‘{1}’...".format(source_directory, bucket_dest_dir))
+
+        if not source_package is None:
+          result_path = self.build_package(source_package)
+          if not os.path.exists(result_path):
+            raise Exception("source package for bucket upload '{0}' does not exist".format(result_path))
+          source_directory = result_path + "/" + source_directory
 
         if not os.path.exists(source_directory):
             raise Exception("source directory for bucket upload '{0}' does not exist".format(source_directory))
-
-
 
         source_file_names = []
         for (source_dir, dir_names, file_names) in os.walk(source_directory):
@@ -108,7 +129,10 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         except:
             return False
 
-    def perform_upload(self, bucket, source_dir, bucket_dest_dir):
+    def perform_upload(self, bucket, defn):
+        source_package = defn.source_package
+        source_dir = defn.source_directory
+        bucket_dest_dir = defn.bucket_destination
         self.log("perform upload '{0}' to bucket dest ‘{1}’...".format(source_dir, bucket_dest_dir))
 
         #max size in bytes before uploading in parts. between 1 and 5 GB recommended
@@ -116,7 +140,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         #size of parts when uploading in parts
         PART_SIZE = 6 * 1000 * 1000
 
-        source_dest_pairs = self.get_file_list(source_dir, bucket_dest_dir);
+        source_dest_pairs = self.get_file_list(source_package, source_dir, bucket_dest_dir);
 
         def percent_cb(complete, total):
             self.log('.')
@@ -165,17 +189,18 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
             self.connect(defn.bucket_name)
 
-            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.bucket_upload_name, defn.bucket_name))
+            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.upload_description, defn.bucket_name))
 
             bucket = self._conn.get_bucket(defn.bucket_name)
 
-            self.perform_upload(bucket, defn.source, defn.bucket_destination)
+            self.perform_upload(bucket, defn)
 
             with self.depl._db:
                 self.state = self.UP
-                self.bucket_upload_name = defn.bucket_upload_name
+                self.upload_description = defn.upload_description
                 self.bucket_name = defn.bucket_name
-                self.source = defn.source
+                self.source_directory = defn.source_directory
+                self.source_package = defn.source_package
                 self.bucket_destination = defn.bucket_destination
                 self.rename_to_uid = defn.rename_to_uid
                 self.region = defn.region
@@ -185,7 +210,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         if self.state == self.UP:
             self.connect(self.bucket_name)
             try:
-                self.log("destroying S3 bucket upload ‘{0}’...".format(self.bucket_upload_name))
+                self.log("destroying S3 bucket upload ‘{0}’...".format(self.upload_description))
                 bucket = self._conn.get_bucket(self.bucket_name)
                 bucketListResultSet = bucket.list(prefix=self.bucket_destination)
                 bucket.delete_keys([key.name for key in bucketListResultSet])
@@ -193,7 +218,6 @@ class S3BucketUploadState(nixops.resources.ResourceState):
             except boto.exception.S3ResponseError as e:
                 if e.error_code != "NoSuchBucket": raise
         return True
-
 
 def region_to_s3_location(self, region):
     # S3 location names are identical to EC2 regions, except for

@@ -1,12 +1,11 @@
 { config, lib, uuid, name, ... }:
 
 with lib;
-
 {
 
   options = {
 
-    uploadName = mkOption {
+    description = mkOption {
       type = types.str;
       description = "Short description of this upload.";
     };
@@ -17,9 +16,14 @@ with lib;
       description = "Name of the S3 bucket to upload to.";
     };
 
-    source = mkOption {
+    sourceDirectory = mkOption {
       type = types.str;
-      description = "Local file or folder path";
+      description = "Local file or folder path. Alternatively a subdirectory from the sourcePackage";
+    };
+
+    sourcePackage = mkOption {
+      type = types.str;
+      description = "Optional Location of Nix package to build and upload";
     };
 
     bucketDestination = mkOption {
@@ -43,6 +47,10 @@ with lib;
     };
 
 
-  };
+  }; #// import ./common-ec2-options.nix { inherit lib; };
+
+  #config = {
+  #  _type = "s3-bucket-upload";
+  #};
 
 }
