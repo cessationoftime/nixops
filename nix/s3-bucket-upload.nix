@@ -5,13 +5,13 @@ with lib;
 
   options = {
 
-    description = mkOption {
+    uploadId = mkOption {
+      default = "s3upload-${uuid}-${name}";
       type = types.str;
       description = "Short description of this upload.";
     };
 
     bucketName = mkOption {
-      default = "charon-${uuid}-${name}";
       type = types.str;
       description = "Name of the S3 bucket to upload to.";
     };

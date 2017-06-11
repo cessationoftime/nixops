@@ -23,7 +23,7 @@ class S3BucketUploadDefinition(nixops.resources.ResourceDefinition):
 
     def __init__(self, xml):
         nixops.resources.ResourceDefinition.__init__(self, xml)
-        self.upload_description = xml.find("attrs/attr[@name='description']/string").get("value")
+        self.upload_id = xml.find("attrs/attr[@name='uploadId']/string").get("value")
         self.bucket_name = xml.find("attrs/attr[@name='bucketName']/string").get("value")
         self.source_directory = xml.find("attrs/attr[@name='sourceDirectory']/string").get("value")
         self.source_package = xml.find("attrs/attr[@name='sourcePackage']/string").get("value")
@@ -41,7 +41,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     """State of an S3 bucket upload."""
 
     state = nixops.util.attr_property("state", nixops.resources.ResourceState.MISSING, int)
-    upload_description = nixops.util.attr_property("ec2.description", None)
+    upload_id = nixops.util.attr_property("ec2.uploadId", None)
     bucket_name = nixops.util.attr_property("ec2.bucketName", None)
     source_directory = nixops.util.attr_property("ec2.sourceDirectory", None)
     source_package = nixops.util.attr_property("ec2.sourcePackage", None)
@@ -57,6 +57,8 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     def __init__(self, depl, name, id):
         nixops.resources.ResourceState.__init__(self, depl, name, id)
         self._conn = None
+        #make argument available to set environment variable in logical configuration.
+        #self.depl.set_argstr(name, "")
 
     def show_type(self):
         s = super(S3BucketUploadState, self).show_type()
@@ -65,7 +67,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
     @property
     def resource_id(self):
-        return self.upload_description
+        return self.upload_id
 
     def get_definition_prefix(self):
         return "resources.s3BucketUploads."
@@ -97,15 +99,18 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     def get_file_list(self, source_package, source_directory, bucket_dest_dir):
         self.log("get file list from '{0}' to bucket dest ‘{1}’...".format(source_directory, bucket_dest_dir))
 
+        #use result_path/source_directory (if using a source_package). otherwise just use source_directory
         if not source_package is None:
           result_path = self.build_package(source_package)
           if not os.path.exists(result_path):
             raise Exception("source package for bucket upload '{0}' does not exist".format(result_path))
           source_directory = result_path + "/" + source_directory
 
+        #make certain there is a valid source_directory
         if not os.path.exists(source_directory):
             raise Exception("source directory for bucket upload '{0}' does not exist".format(source_directory))
 
+        # get the list of fully qualified file paths in the source directory and subdirectories
         source_file_names = []
         for (source_dir, dir_names, file_names) in os.walk(source_directory):
             for fn in file_names:
@@ -189,7 +194,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
             self.connect(defn.bucket_name)
 
-            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.upload_description, defn.bucket_name))
+            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.upload_id, defn.bucket_name))
 
             bucket = self._conn.get_bucket(defn.bucket_name)
 
@@ -197,7 +202,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
             with self.depl._db:
                 self.state = self.UP
-                self.upload_description = defn.upload_description
+                self.upload_id = defn.upload_id
                 self.bucket_name = defn.bucket_name
                 self.source_directory = defn.source_directory
                 self.source_package = defn.source_package
@@ -210,7 +215,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         if self.state == self.UP:
             self.connect(self.bucket_name)
             try:
-                self.log("destroying S3 bucket upload ‘{0}’...".format(self.upload_description))
+                self.log("destroying S3 bucket upload ‘{0}’...".format(self.upload_id))
                 bucket = self._conn.get_bucket(self.bucket_name)
                 bucketListResultSet = bucket.list(prefix=self.bucket_destination)
                 bucket.delete_keys([key.name for key in bucketListResultSet])
