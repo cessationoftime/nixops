@@ -49,6 +49,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
     rename_to_uid = nixops.util.attr_property("ec2.renameToUID", None)
     region = nixops.util.attr_property("ec2.region", None)
     access_key_id = nixops.util.attr_property("ec2.accessKeyId", None)
+    upload_destination = nixops.util.attr_property("ec2.uploadDestination", None)
 
     @classmethod
     def get_type(cls):
@@ -96,15 +97,17 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
         return result_path
 
-    def get_file_list(self, source_package, source_directory, bucket_dest_dir):
-        self.log("get file list from '{0}' to bucket dest ‘{1}’...".format(source_directory, bucket_dest_dir))
-
+    def determine_actual_source_directory(self, source_package, source_directory):
         #use result_path/source_directory (if using a source_package). otherwise just use source_directory
         if not source_package is None:
           result_path = self.build_package(source_package)
           if not os.path.exists(result_path):
             raise Exception("source package for bucket upload '{0}' does not exist".format(result_path))
           source_directory = result_path + "/" + source_directory
+        return source_directory
+
+    def get_file_list(self, source_directory, bucket_dest_dir):
+        self.log("get file list from '{0}' to bucket dest ‘{1}’...".format(source_directory, bucket_dest_dir))
 
         #make certain there is a valid source_directory
         if not os.path.exists(source_directory):
@@ -138,14 +141,17 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         source_package = defn.source_package
         source_dir = defn.source_directory
         bucket_dest_dir = defn.bucket_destination
-        self.log("perform upload '{0}' to bucket dest ‘{1}’...".format(source_dir, bucket_dest_dir))
+
 
         #max size in bytes before uploading in parts. between 1 and 5 GB recommended
         MAX_SIZE = 20 * 1000 * 1000
         #size of parts when uploading in parts
         PART_SIZE = 6 * 1000 * 1000
 
-        source_dest_pairs = self.get_file_list(source_package, source_dir, bucket_dest_dir);
+        actual_source_dir = self.determine_actual_source_directory(source_package, source_dir);
+        self.log("perform upload '{0}' to bucket dest ‘{1}’...".format(actual_source_dir, bucket_dest_dir))
+
+        source_dest_pairs = self.get_file_list(actual_source_dir, bucket_dest_dir);
 
         def percent_cb(complete, total):
             self.log('.')
@@ -175,6 +181,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
                 k.key = dest_path
                 k.set_contents_from_filename(source_path, cb=percent_cb, num_cb=10)
 
+        return actual_source_dir
 
     def create_after(self, resources, defn):
         return {r for r in resources if
@@ -194,15 +201,16 @@ class S3BucketUploadState(nixops.resources.ResourceState):
 
             self.connect(defn.bucket_name)
 
-            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.upload_id, defn.bucket_name))
+            self.log("uploading '{0}' to S3 bucket ‘{1}’...".format(defn.source_package + "/" + defn.source_directory, defn.bucket_name))
 
             bucket = self._conn.get_bucket(defn.bucket_name)
 
-            self.perform_upload(bucket, defn)
+            upload_destination = self.perform_upload(bucket, defn)
 
             with self.depl._db:
                 self.state = self.UP
                 self.upload_id = defn.upload_id
+                self.upload_destination = upload_destination
                 self.bucket_name = defn.bucket_name
                 self.source_directory = defn.source_directory
                 self.source_package = defn.source_package
