@@ -188,7 +188,7 @@ class S3BucketUploadState(nixops.resources.ResourceState):
         if len(defn.bucket_name) > 63:
             raise Exception("bucket name ‘{0}’ is longer than 63 characters.".format(defn.bucket_name))
 
-        if check or self.state != self.UP:
+        if check or self.state != self.UP or defn.bucket_folder != self.bucket_folder:
 
             self.connect(defn.bucket_name)
 
