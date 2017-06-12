@@ -8,12 +8,17 @@ with lib;
     uploadId = mkOption {
       default = "s3upload-${uuid}-${name}";
       type = types.str;
-      description = "Short description of this upload.";
+      description = "The name of this s3 bucket upload";
     };
 
     bucketName = mkOption {
       type = types.str;
       description = "Name of the S3 bucket to upload to.";
+    };
+
+    bucketFolder = mkOption {
+      type = types.str;
+      description = "Name of the S3 bucket folder to upload to.";
     };
 
     sourceDirectory = mkOption {
@@ -26,16 +31,6 @@ with lib;
       description = "Optional Location of Nix package to build and upload";
     };
 
-    bucketDestination = mkOption {
-      type = types.str;
-      description = "Bucket file key (remote path).";
-    };
-
-    renameToUID = mkOption {
-      type = types.bool;
-      description = "Rename the uploaded file or folder to a unique identifier.";
-    };
-
     region = mkOption {
       type = types.str;
       description = "Amazon S3 region.";
@@ -46,11 +41,10 @@ with lib;
       description = "The AWS Access Key ID.";
     };
 
+  };
 
-  }; #// import ./common-ec2-options.nix { inherit lib; };
-
-  #config = {
-  #  _type = "s3-bucket-upload";
-  #};
+  config = {
+    _type = "s3-bucket-upload";
+  };
 
 }
